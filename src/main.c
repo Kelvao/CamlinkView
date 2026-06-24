@@ -222,9 +222,14 @@ main (int argc, char **argv)
 
         /* Só aplica resultado se o usuário não passou o parâmetro explicitamente */
         if (!app.video.device && det.video_device)
-            app.video.device = det.video_device;
+            app.video.device = det.video_device;  /* transfere ownership */
+        else
+            free (det.video_device);
+
         if (!audio_source)
-            audio_source = det.audio_source;  /* NULL = sem áudio, não-fatal */
+            audio_source = det.audio_source;      /* transfere ownership */
+        else
+            free (det.audio_source);
     }
 
     /* Garante fallback de device se nada foi encontrado */
@@ -249,7 +254,18 @@ main (int argc, char **argv)
         goto cleanup;
 
     video_set_on_stream_ready (&app.video, on_stream_ready, &app);
+
+    /* Controles de imagem — inicializa ANTES de video_open para que o
+     * callback on_stream_ready possa chamar controls_refresh com segurança. */
+    app.audio   = audio_create   (audio_source);             /* non-fatal */
+    app.overlay = overlay_create (app.renderer.renderer);    /* non-fatal */
+
+    controls_init (&app.controls, -1);   /* fd ainda inválido — será atualizado abaixo */
+
     if (!video_open (&app.video)) goto cleanup;
+
+    /* Atualiza o fd nos controls com o valor real aberto pelo driver */
+    app.controls.fd = app.video.fd;
 
     /* Se o driver ajustou as dimensões, recria a textura com o tamanho real */
     if (app.video.width != req_w || app.video.height != req_h) {
@@ -258,13 +274,6 @@ main (int argc, char **argv)
         if (!renderer_resize (&app.renderer, app.video.width, app.video.height))
             goto cleanup;
     }
-
-    app.audio   = audio_create   (audio_source);             /* non-fatal */
-    app.overlay = overlay_create (app.renderer.renderer);    /* non-fatal */
-
-    /* Controles de imagem — lê valores diretamente do driver.
-     * Não usa arquivo de config — o driver é a fonte de verdade. */
-    controls_init (&app.controls, app.video.fd);
 
     app.menu = menu_create (app.renderer.renderer, &app.controls); /* non-fatal */
 
@@ -277,5 +286,10 @@ cleanup:
     audio_destroy    (app.audio);
     video_close      (&app.video);
     renderer_deinit  (&app.renderer);
+    /* Libera strings heap da detecção automática (NULL-safe) */
+    if (auto_detect) {
+        free (app.video.device);
+        free ((char *)audio_source);
+    }
     return 0;
 }

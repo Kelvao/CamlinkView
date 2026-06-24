@@ -108,6 +108,12 @@ controls_init (Controls *c, int v4l2_fd)
         ctrl->key     = CTRL_META[i].key;
         ctrl->v4l2_id = CTRL_META[i].v4l2_id;
 
+        /* fd=-1 significa que o device ainda não foi aberto; adiar queries. */
+        if (v4l2_fd < 0) {
+            ctrl->supported = false;
+            continue;
+        }
+
         ctrl->supported = query_ctrl (v4l2_fd, ctrl->v4l2_id, ctrl);
         if (ctrl->supported) {
             ctrl->value       = get_ctrl (v4l2_fd, ctrl->v4l2_id, ctrl->default_val);
@@ -135,10 +141,17 @@ void
 controls_refresh (Controls *c)
 {
     /* Relê cada controle direto do driver — útil após VIDIOC_STREAMON
-     * quando FLAG_INACTIVE é levantado e os valores reais ficam disponíveis */
+     * quando FLAG_INACTIVE é levantado e os valores reais ficam disponíveis.
+     * Também inicializa metadados se controls_init foi chamado com fd=-1. */
     for (int i = 0; i < CTRL_COUNT; i++) {
         Control *ctrl = &c->controls[i];
-        if (!ctrl->supported) continue;
+
+        /* Se ainda não foi consultado (fd era inválido na init), faz agora */
+        if (!ctrl->supported) {
+            ctrl->supported = query_ctrl (c->fd, ctrl->v4l2_id, ctrl);
+            if (!ctrl->supported) continue;
+        }
+
         ctrl->value       = get_ctrl (c->fd, ctrl->v4l2_id, ctrl->default_val);
         ctrl->initial_val = ctrl->value;
     }
@@ -163,8 +176,6 @@ controls_reset_defaults (Controls *c)
         if (!ctrl->supported) continue;
         ctrl->value = ctrl->default_val;
         set_ctrl (c->fd, ctrl->v4l2_id, ctrl->value);
-        fprintf(stderr, "%d\n", ctrl->value);
-        fflush(stderr);
     }
 }
 

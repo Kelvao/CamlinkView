@@ -6,6 +6,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <unistd.h>
+#include <poll.h>
 #include <sys/ioctl.h>
 #include <sys/mman.h>
 #include <linux/videodev2.h>
@@ -52,6 +53,11 @@ video_open (VideoDevice *dev)
     };
     if (ioctl (dev->fd, VIDIOC_REQBUFS, &req) < 0) {
         fprintf (stderr, "video: VIDIOC_REQBUFS: %s\n", strerror (errno));
+        goto err_close;
+    }
+    if (req.count < VIDEO_BUF_COUNT) {
+        fprintf (stderr, "video: VIDIOC_REQBUFS: driver alocou apenas %u buffers (pedido %d)\n",
+                 req.count, VIDEO_BUF_COUNT);
         goto err_close;
     }
 
@@ -127,6 +133,17 @@ bool
 video_dequeue (VideoDevice *dev, VideoFrame *frame, bool *fatal)
 {
     *fatal = false;
+
+    /* Bloqueia até um frame ficar disponível (timeout 100ms para checar g_quit) */
+    struct pollfd pfd = { .fd = dev->fd, .events = POLLIN };
+    int ret = poll (&pfd, 1, 100);
+    if (ret < 0) {
+        if (errno == EINTR) return false;
+        fprintf (stderr, "video: poll: %s\n", strerror (errno));
+        *fatal = true;
+        return false;
+    }
+    if (ret == 0) return false;   /* timeout — sem frame disponível */
 
     struct v4l2_buffer vbuf = {
         .type   = V4L2_BUF_TYPE_VIDEO_CAPTURE,

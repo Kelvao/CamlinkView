@@ -22,9 +22,7 @@ static const char * const AUDIO_KEYWORDS[] = {
     "Cam_Link_4K", "CamLink", "cam_link", "Elgato", "Cam Link 4K Estéreo analógico", NULL
 };
 
-/* Buffers estáticos para os resultados */
-static char s_video_buf[BUF_SIZE];
-static char s_audio_buf[BUF_SIZE];
+/* Buffers estáticos removidos — resultados agora são alocados no heap */
 
 /* ── Helpers ─────────────────────────────────────────────────────────────── */
 
@@ -45,7 +43,7 @@ str_contains_any (const char *haystack, const char * const *needles)
 
 /* ── Detecção de vídeo ───────────────────────────────────────────────────── */
 
-static const char *
+static char *
 detect_video (void)
 {
     char path[32];
@@ -59,48 +57,38 @@ detect_video (void)
 
         bool found = false;
         if (ioctl (fd, VIDIOC_QUERYCAP, &cap) == 0) {
-            /* Checa card name e bus_info */
             found = str_contains_any ((const char *)cap.card,     VIDEO_KEYWORDS)
                  || str_contains_any ((const char *)cap.bus_info,  VIDEO_KEYWORDS);
         }
         close (fd);
 
-        if (found) {
-            snprintf (s_video_buf, sizeof s_video_buf, "%s", path);
-            return s_video_buf;
-        }
+        if (found)
+            return strdup (path);
     }
     return NULL;
 }
 
 /* ── Detecção de áudio ───────────────────────────────────────────────────── */
 
-static const char *
+static char *
 detect_audio (void)
 {
-    /*
-     * Usa `pactl list sources short` — disponível em sistemas com
-     * PulseAudio ou PipeWire-pulse. Formato de saída:
-     *   <id>\t<name>\t<module>\t<format>\t<state>
-     */
     FILE *f = popen ("pw-cli ls Node 2>/dev/null | grep 'node.name ='", "r");
     if (!f) return NULL;
 
     char line[512];
-    const char *found = NULL;
+    char *found = NULL;
 
     while (fgets (line, sizeof line, f)) {
-        // Limpa a linha para pegar o conteúdo entre aspas
         char *desc = strchr (line, '"');
         if (!desc) continue;
-        desc++; // Pula a primeira aspa
-        
+        desc++;
+
         char *end = strrchr (desc, '"');
-        if (end) *end = '\0'; // Remove a última aspa
+        if (end) *end = '\0';
 
         if (str_contains_any (desc, AUDIO_KEYWORDS)) {
-            snprintf (s_audio_buf, sizeof s_audio_buf, "%s", desc);
-            found = s_audio_buf;
+            found = strdup (desc);
             break;
         }
     }
@@ -118,6 +106,15 @@ detect_camlink (void)
         .video_device = detect_video (),
         .audio_source = detect_audio (),
     };
+}
+
+void
+detect_free (DetectResult *r)
+{
+    free ((char *)r->video_device);
+    free ((char *)r->audio_source);
+    r->video_device = NULL;
+    r->audio_source = NULL;
 }
 
 void

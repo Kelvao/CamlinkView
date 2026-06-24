@@ -50,6 +50,7 @@ struct Menu {
     bool         dirty;      /* valores mudaram desde o último save */
     bool         just_saved; /* feedback visual de "salvo"          */
     uint32_t     saved_ts;   /* timestamp do feedback               */
+    bool         render_dirty; /* texture precisa ser rerenderizada */
 };
 
 /* ── Font helpers ────────────────────────────────────────────────────────── */
@@ -240,7 +241,7 @@ menu_is_open (const Menu *m)
 void
 menu_toggle (Menu *m)
 {
-    if (m) m->open = !m->open;
+    if (m) { m->open = !m->open; m->render_dirty = true; }
 }
 
 bool
@@ -258,6 +259,7 @@ menu_handle_event (Menu *m, const SDL_Event *ev)
             m->selected = (m->selected - 1 + CTRL_COUNT) % CTRL_COUNT;
         } while (!m->controls->controls[m->selected].supported
                  && m->selected != orig);
+        m->render_dirty = true;
         return true;
     }
 
@@ -267,6 +269,7 @@ menu_handle_event (Menu *m, const SDL_Event *ev)
             m->selected = (m->selected + 1) % CTRL_COUNT;
         } while (!m->controls->controls[m->selected].supported
                  && m->selected != orig);
+        m->render_dirty = true;
         return true;
     }
 
@@ -274,28 +277,33 @@ menu_handle_event (Menu *m, const SDL_Event *ev)
     case SDLK_RIGHT:
         controls_inc (m->controls, (CtrlId)m->selected, 1);
         m->dirty = true;
+        m->render_dirty = true;
         return true;
 
     case SDLK_LEFT:
         controls_dec (m->controls, (CtrlId)m->selected, 1);
         m->dirty = true;
+        m->render_dirty = true;
         return true;
 
     /* Passo grande com shift */
     case SDLK_PAGEUP:
         controls_inc (m->controls, (CtrlId)m->selected, 10);
         m->dirty = true;
+        m->render_dirty = true;
         return true;
 
     case SDLK_PAGEDOWN:
         controls_dec (m->controls, (CtrlId)m->selected, 10);
         m->dirty = true;
+        m->render_dirty = true;
         return true;
 
     /* Ações */
     case SDLK_r:
         controls_restore_initial (m->controls);
         m->dirty = true;
+        m->render_dirty = true;
         return true;
 
     case SDLK_s:
@@ -303,6 +311,7 @@ menu_handle_event (Menu *m, const SDL_Event *ev)
             m->dirty      = false;
             m->just_saved = true;
             m->saved_ts   = SDL_GetTicks ();
+            m->render_dirty = true;
         }
         return true;
 
@@ -333,11 +342,17 @@ menu_draw (Menu *m, SDL_Renderer *renderer, int win_w, int win_h)
 {
     if (!m || !m->open) return;
 
-    /* Limpa feedback de "salvo" após 1.5s */
-    if (m->just_saved && SDL_GetTicks () - m->saved_ts >= 1500)
-        m->just_saved = false;
+    /* Limpa feedback de "salvo" após 1.5s — marca dirty para redesenhar */
+    if (m->just_saved && SDL_GetTicks () - m->saved_ts >= 1500) {
+        m->just_saved  = false;
+        m->render_dirty = true;
+    }
 
-    render_menu (m, renderer);
+    /* Só rerenderiza a texture quando algo mudou */
+    if (m->render_dirty) {
+        render_menu (m, renderer);
+        m->render_dirty = false;
+    }
 
     /* Centraliza na janela */
     const SDL_Rect dst = {

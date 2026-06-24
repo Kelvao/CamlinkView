@@ -205,7 +205,8 @@ void
 audio_destroy (AudioState *a)
 {
     if (!a) return;
-    pw_thread_loop_stop    (a->loop);
+    pw_thread_loop_stop (a->loop);
+    /* Após stop, o loop thread está inativo — seguro destruir sem lock */
     pw_stream_destroy      (a->playback);
     pw_stream_destroy      (a->capture);
     pw_core_disconnect     (a->core);

@@ -21,7 +21,7 @@ typedef struct {
     int                 width;
     int                 height;
     int                 fps;
-    const char         *device;
+    char               *device;
     VideoOnStreamReady  on_stream_ready;
     void               *on_stream_ready_data;
 } VideoDevice;
